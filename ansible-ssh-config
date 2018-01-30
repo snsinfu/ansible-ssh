@@ -1,0 +1,47 @@
+#!/bin/sh -eu
+
+inventory=
+nocheck=
+
+while getopts i:n opt; do
+    case "${opt}" in
+    i)  inventory="${OPTARG}"
+        ;;
+    n)  nocheck=yes
+        ;;
+    *)  exit 1
+    esac
+done
+shift $((${OPTIND} - 1))
+
+target="${1:-}"
+
+if test -n "${inventory}"; then
+    ansible-inventory --list --inventory-file "${inventory}" "${target}"
+else
+    ansible-inventory --list "${target}"
+fi |
+jq --raw-output '
+    ._meta.hostvars
+    | to_entries[]
+    | [ .key
+      , .value.ansible_host
+      , .value.ansible_port // 22
+      , .value.ansible_user // "root"
+      , .value.ansible_ssh_private_key_file
+      ]
+    | @tsv' |
+awk -v nocheck="${nocheck}" '{
+    print "Host " $1
+    print "  HostName " $2
+    print "  Port " $3
+    print "  User " $4
+    print "  IdentityFile " $5
+    print "  IdentitiesOnly yes"
+    print "  PasswordAuthentication no"
+
+    if (nocheck == "yes") {
+        print "  StrictHostKeyChecking no"
+        print "  UserKnownHostsFile /dev/null"
+    }
+}'
